@@ -223,8 +223,6 @@ fn write_impl() {
     let puzzle = Puzzle {
         preamble: vec![],
         version: *b"1.4\0",
-        reserved1: [0u8; 2],
-        reserved2: [0u8; 12],
         title: "The First Crossword".to_string(),
         author: "Nathan Dobson".to_string(),
         copyright: "".to_string(),
@@ -232,11 +230,10 @@ fn write_impl() {
             match grid[(x, y)] {
                 Cell::Black => PuzzleCell::Black,
                 Cell::White(Some(x)) => PuzzleCell::White {
-                    solution: Some(x.to_unicode() as u8),
+                    solution: [x.to_unicode()].iter().cloned().collect(),
                     answer: None,
                     across_clue: 0,
                     down_clue: 0,
-                    rebus: None,
                     was_incorrect: false,
                     is_incorrect: false,
                     given: false,
@@ -247,9 +244,6 @@ fn write_impl() {
         }),
         clues: clue_list.into_iter().map(|(window, clue)| Clue { window, clue: clue.to_string() }).collect(),
         note: "".to_string(),
-        has_rebus_index: false,
-        has_rebus_data: false,
-        has_style: false,
     };
     let mut new_data: Vec<u8> = vec![];
     puzzle.write_to(&mut new_data).unwrap();

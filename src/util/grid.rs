@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut, Range};
 use crate::core::puzzle::Direction;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Grid<T> {
     size: (usize, usize),
     elements: Vec<T>,

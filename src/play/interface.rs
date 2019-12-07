@@ -283,7 +283,7 @@ impl<'a> TerminalOutput<'a> {
                 let contents = match answer {
                     None => iter::repeat(' ').take(CELL_WIDTH).collect::<String>(),
                     Some(c) => {
-                        let grid = draw_letter(*c);
+                        let grid = draw_letter(c.chars().next().unwrap() as u8);
                         (0..CELL_WIDTH).map(|dx| grid[(dx, dy)]).collect::<String>()
                     }
                 };
@@ -323,16 +323,14 @@ impl<'a> TerminalOutput<'a> {
         };
 
         let mut solved = true;
-        for y in 0..self.puzzle.grid.size().1 {
-            for x in 0..self.puzzle.grid.size().0 {
-                match self.puzzle.grid[(x, y)] {
-                    PuzzleCell::White { answer, solution: Some(solution), .. } => {
-                        if Some(solution) != answer {
-                            solved = false;
-                        }
+        for cell in self.puzzle.grid.iter() {
+            match cell {
+                PuzzleCell::White { answer, solution, .. } => {
+                    if Some(solution) != answer.as_ref() {
+                        solved = false;
                     }
-                    _ => {}
                 }
+                _ => {}
             }
         }
         if solved {

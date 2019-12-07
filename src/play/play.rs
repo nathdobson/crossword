@@ -76,7 +76,7 @@ impl<'a> Play<'a> {
         match &mut self.puzzle.grid[self.view.position] {
             PuzzleCell::Black => {}
             PuzzleCell::White { across_clue, down_clue, answer, .. } => {
-                *answer = Some(input.to_ascii_uppercase());
+                *answer = Some(String::from_utf8(vec![input.to_ascii_uppercase()]).unwrap());
                 match self.view.direction {
                     Direction::Across => {
                         let clue = &self.puzzle.clues[*across_clue];
