@@ -35,7 +35,7 @@ pub fn take_all_results<'a, T>(result: &'a mut Vec<T>) -> impl 'a + FnMut(T) -> 
 
 impl fmt::Debug for Search {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (i,(window, set)) in self.sets.iter().enumerate() {
+        for (i, (window, set)) in self.sets.iter().enumerate() {
             if set.size() == 1 {
                 write!(f, "{:?} ", set)?;
             }
@@ -55,7 +55,7 @@ impl Search {
                     |window| {
                         (window, WordSet::from_words(words, window.length()))
                     }
-                ).collect(), windows.grid_size())
+                ), windows.grid_size())
         }
     }
 
@@ -106,7 +106,7 @@ impl Search {
         while let Some(&window) = dirty.iter().next() {
             for (offset, position) in window.positions().enumerate() {
                 if let Some(perp) = self.sets.window_at(position, window.direction().perpendicular()) {
-                    let perp_offset = perp.offset(position);
+                    let perp_offset = perp.offset(position).unwrap();
                     let letters = self.sets[window].letters(offset);
                     let perp_letters = self.sets[perp].letters(perp_offset);
                     if !perp_letters.is_subset(letters) {
@@ -178,7 +178,7 @@ impl Search {
                 self.sets.iter()
                     .filter(|(window, set)| condition(*window))
                     .map(|(window, set)| (window, set.clone()))
-                    .collect(),
+                ,
                 self.sets.grid_size())
         }
     }
@@ -259,7 +259,7 @@ impl Search {
 
     pub fn letter_set_for_direction(&self, position: (usize, usize), direction: Direction) -> Option<LetterSet> {
         self.sets.window_at(position, direction).map(|window|
-            self.sets[window].letters(window.offset(position))
+            self.sets[window].letters(window.offset(position).unwrap())
         )
     }
 
@@ -281,7 +281,7 @@ impl Search {
         for &direction in &[Direction::Across, Direction::Down] {
             if let Some(window) = self.sets.window_at(position, direction) {
                 self.sets[window].retain(|word| {
-                    set.get(word[window.offset(position)])
+                    set.get(word[window.offset(position).unwrap()])
                 });
             }
         }

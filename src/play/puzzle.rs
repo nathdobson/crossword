@@ -20,34 +20,25 @@ use std::ffi::OsStr;
 use std::collections::{HashMap, BTreeSet};
 use std::collections::BTreeMap;
 use crate::util::grid::Grid;
-use crate::core::puzzle::{Direction, Window};
+use crate::core::puzzle::{Direction, Window, WindowMap, Cell};
 use crate::play::raw_puzzle::MAGIC;
 
 #[derive(Clone)]
 pub struct View {
     pub position: (usize, usize),
     pub direction: Direction,
+    pub editing: bool,
 }
 
-#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Debug)]
-pub enum PuzzleCell {
-    Black,
-    White {
-        solution: String,
-        answer: Option<String>,
-        across_clue: usize,
-        down_clue: usize,
-        was_incorrect: bool,
-        is_incorrect: bool,
-        given: bool,
-        circled: bool,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Clue {
-    pub window: Window,
-    pub clue: String,
+#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Debug, Default)]
+pub struct PuzzleCell {
+    pub solution: String,
+    pub answer: String,
+    pub pencil: bool,
+    pub was_incorrect: bool,
+    pub is_incorrect: bool,
+    pub given: bool,
+    pub circled: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -57,12 +48,12 @@ pub struct Puzzle {
     pub title: String,
     pub author: String,
     pub copyright: String,
-    pub grid: Grid<PuzzleCell>,
-    pub clues: Vec<Clue>,
+    pub grid: Grid<Option<PuzzleCell>>,
+    pub clues: WindowMap<String>,
     pub note: String,
 }
 
-pub fn windows<T>(grid: &Grid<T>, mut black: impl FnMut(&T) -> bool) -> Vec<Window> {
+/*pub fn windows<T>(grid: &Grid<T>, mut black: impl FnMut(&T) -> bool) -> Vec<Window> {
     let mut result = vec![];
     for y in 0..grid.size().1 {
         let ranges = (0..grid.size().0).range_split(|&x| {
@@ -94,13 +85,17 @@ pub fn windows<T>(grid: &Grid<T>, mut black: impl FnMut(&T) -> bool) -> Vec<Wind
     }
 
     result
-}
+}*/
+
 
 fn string_to_letter(string: &str) -> Option<u8> {
-    if string.len() == 1 {
+    if string.chars().count() == 1 {
         let c = string.chars().next().unwrap();
         if c >= 'A' && c <= 'Z' {
             return Some(c as u8);
+        }
+        if c >= 'a' && c <= 'z' {
+            return Some(c.to_ascii_uppercase() as u8);
         }
     }
     None
@@ -108,13 +103,13 @@ fn string_to_letter(string: &str) -> Option<u8> {
 
 impl Puzzle {
     fn from_raw(raw: RawPuzzle) -> Self {
-        let mut grid =
+        let grid =
             Grid::new(
                 raw.solution.size(),
                 |x, y|
                     match (raw.answer[(x, y)], raw.solution[(x, y)]) {
-                        (b'.', b'.') => PuzzleCell::Black,
-                        (answer, solution_letter) => {
+                        (b'.', b'.') => None,
+                        (raw_answer, solution_letter) => {
                             let style = raw.style.as_ref().map_or(0, |style| style[(x, y)]);
                             let solution = match (&raw.rebus_index, &raw.rebus_data) {
                                 (Some(rebus_index), Some(rebus_data)) => {
@@ -124,54 +119,35 @@ impl Puzzle {
                                 }
                                 _ => None
                             }.unwrap_or(String::from_utf8(vec![solution_letter]).unwrap());
-                            PuzzleCell::White {
-                                across_clue: usize::max_value(),
-                                down_clue: usize::max_value(),
-                                answer: if answer == b'-' { None } else { Some(String::from_utf8(vec![answer]).unwrap()) },
+                            let mut answer = "".to_string();
+                            if let Some(rebus_user) = &raw.rebus_user {
+                                answer = rebus_user[(x, y)].to_string();
+                            }
+                            if answer == "" && raw_answer != b'-' {
+                                answer = String::from_utf8(vec![raw_answer]).unwrap();
+                            }
+                            Some(PuzzleCell {
                                 solution,
+                                answer,
                                 was_incorrect: (style & 0x10) != 0,
                                 is_incorrect: (style & 0x20) != 0,
                                 given: (style & 0x40) != 0,
                                 circled: (style & 0x80) != 0,
-                            }
+                                pencil: (style & 0x08) != 0,
+                            })
                         }
                     });
-        let mut wins: Vec<Window> = windows(&grid, |cell| {
-            match cell {
-                PuzzleCell::Black => true,
-                _ => false
-            }
-        });
-        wins.sort_by_key(|win| { (win.position().1, win.position().0, win.direction()) });
-        assert_eq!(wins.len(), raw.clues.len());
-        let mut clues: Vec<Clue> = wins.iter().zip(raw.clues.iter()).map(|(&window, clue)| { Clue { window, clue: clue.clone() } }).collect();
-        clues.sort_by_key(|clue| (clue.window.direction(), clue.window.position().1, clue.window.position().0));
-        for (clue_index, clue) in clues.iter_mut().enumerate() {
-            match clue.window.direction() {
-                Direction::Across => {
-                    for x in clue.window.position().0..clue.window.position().0 + clue.window.length() {
-                        match &mut grid[(x, clue.window.position().1)] {
-                            PuzzleCell::White { across_clue, .. } => {
-                                assert_eq!(*across_clue, usize::max_value());
-                                *across_clue = clue_index
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Direction::Down => {
-                    for y in clue.window.position().1..clue.window.position().1 + clue.window.length() {
-                        match &mut grid[(clue.window.position().0, y)] {
-                            PuzzleCell::White { down_clue, .. } => {
-                                assert_eq!(*down_clue, usize::max_value());
-                                *down_clue = clue_index
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
+        let mut windows: Vec<Window> = WindowMap::from_grid(&Grid::new(grid.size(), |x, y| {
+            grid[(x, y)].is_some()
+        })).windows().collect();
+        windows.sort_by_key(|win| { (win.position().1, win.position().0, win.direction()) });
+        assert_eq!(windows.len(), raw.clues.len());
+        let clues =
+            WindowMap::new(
+                windows.iter()
+                    .zip(raw.clues.iter())
+                    .map(|(&window, clue)| { (window, clue.clone()) }),
+                grid.size());
         let result = Puzzle {
             preamble: raw.header.preamble,
             version: raw.header.version,
@@ -179,35 +155,25 @@ impl Puzzle {
             author: raw.author,
             copyright: raw.copyright,
             grid: grid,
-            clues: clues,
+            clues,
             note: raw.note,
         };
-        for (clue_index, clue) in result.clues.iter().enumerate() {
-            assert_eq!(Some(clue_index), result.get_clue(&View { position: clue.window.position(), direction: clue.window.direction() }));
-        }
         return result;
-    }
-    pub fn get_clue(&self, view: &View) -> Option<usize> {
-        match self.grid[view.position] {
-            PuzzleCell::White { across_clue, down_clue, .. } => {
-                match view.direction {
-                    Direction::Across => Some(across_clue),
-                    Direction::Down => Some(down_clue)
-                }
-            }
-            PuzzleCell::Black => None
-        }
     }
 
     pub fn read_from(read: &mut dyn BufRead) -> io::Result<Puzzle> {
         Ok(Self::from_raw(RawPuzzle::read_from(read)?))
     }
 
-    pub fn into_raw(mut self) -> RawPuzzle {
-        self.clues.sort_by_key(|clue| (clue.window.position().1, clue.window.position().0, clue.window.direction()));
+    pub fn into_raw(&self) -> RawPuzzle {
+        let mut clues =
+            self.clues.iter()
+                .map(|(window, clue)| (window, clue.clone()))
+                .collect::<Vec<_>>();
+        clues.sort_by_key(|(window, clue)| (window.position().1, window.position().0, window.direction()));
         let rebuses: BTreeSet<String> = self.grid.iter().filter_map(|cell| {
             match cell {
-                PuzzleCell::White { solution, .. } => {
+                Some(PuzzleCell { solution, .. }) => {
                     if string_to_letter(solution).is_some() {
                         None
                     } else {
@@ -221,7 +187,7 @@ impl Puzzle {
             (Some(rebuses.iter().cloned().enumerate().map(|(index, rebus)| (index as u8, rebus)).collect()),
              Some(Grid::new(self.grid.size(), |x, y| {
                  match &self.grid[(x, y)] {
-                     PuzzleCell::White { solution, .. } =>
+                     Some(PuzzleCell { solution, .. }) =>
                          rebuses.iter()
                              .position(|rebus| rebus == solution)
                              .map(|x| x + 1).unwrap_or(0) as u8,
@@ -234,14 +200,17 @@ impl Puzzle {
         };
         let style_grid = Grid::new(self.grid.size(), |x, y| {
             match self.grid[(x, y)] {
-                PuzzleCell::Black => 0,
-                PuzzleCell::White {
-                    was_incorrect,
-                    is_incorrect,
-                    given,
-                    circled, ..
-                } => {
+                None => 0,
+                Some(PuzzleCell {
+                         pencil,
+                         was_incorrect,
+                         is_incorrect,
+                         given,
+                         circled,
+                         ..
+                     }) => {
                     let mut bitmap = 0;
+                    if pencil { bitmap |= 0x08 }
                     if was_incorrect { bitmap |= 0x10; }
                     if is_incorrect { bitmap |= 0x20; }
                     if given { bitmap |= 0x40; }
@@ -255,7 +224,24 @@ impl Puzzle {
         } else {
             None
         };
-        RawPuzzle {
+        let rebus_user_grid: Grid<String> = Grid::new(self.grid.size(), |x, y| {
+            match &self.grid[(x, y)] {
+                None => "".to_string(),
+                Some(PuzzleCell { answer, .. }) => {
+                    if string_to_letter(answer).is_none() {
+                        answer.to_string()
+                    } else {
+                        "".to_string()
+                    }
+                }
+            }
+        });
+        let rebus_user = if rebus_user_grid.iter().any(|x| !x.is_empty()) {
+            Some(rebus_user_grid)
+        } else {
+            None
+        };
+        let result = RawPuzzle {
             header: RawHeader {
                 preamble: self.preamble.clone(),
                 version: self.version,
@@ -263,31 +249,34 @@ impl Puzzle {
                 reserved2: [0u8; 12],
                 width: self.grid.size().0 as u8,
                 height: self.grid.size().1 as u8,
-                clues: self.clues.len() as u16,
+                clues: clues.len() as u16,
             },
             solution: Grid::new(self.grid.size(), |x, y| {
                 match &self.grid[(x, y)] {
-                    PuzzleCell::Black => b'.',
-                    PuzzleCell::White { solution, .. } =>
+                    None => b'.',
+                    Some(PuzzleCell { solution, .. }) =>
                         string_to_letter(solution).unwrap_or(b'-')
                 }
             }),
             answer: Grid::new(self.grid.size(), |x, y| {
                 match &self.grid[(x, y)] {
-                    PuzzleCell::Black => b'.',
-                    PuzzleCell::White { answer, .. } =>
-                        answer.as_ref().and_then(|string| string_to_letter(&string)).unwrap_or(b'-'),
+                    None => b'.',
+                    Some(PuzzleCell { answer, .. }) =>
+                        string_to_letter(answer).unwrap_or(b'-'),
                 }
             }),
             rebus_index: rebus_index,
             rebus_data: rebus_data,
+            rebus_user: rebus_user,
+            play_data: None,
             style: style,
-            title: self.title,
-            author: self.author,
-            copyright: self.copyright,
-            clues: self.clues.into_iter().map(|clue| clue.clue).collect::<Vec<_>>(),
-            note: self.note,
-        }
+            title: self.title.clone(),
+            author: self.author.clone(),
+            copyright: self.copyright.clone(),
+            clues: clues.into_iter().map(|(window, clue)| clue).collect(),
+            note: self.note.clone(),
+        };
+        result
     }
 
     pub fn write_to(self, write: &mut dyn Write) -> io::Result<()> {
@@ -323,45 +312,35 @@ fn test_encode_decode() {
         copyright: "Copyright".to_string(),
         grid: Grid::new((3, 3), |x, y| {
             if x == 1 && y == 1 {
-                PuzzleCell::Black
+                None
             } else {
-                PuzzleCell::White {
+                Some(PuzzleCell {
                     solution: match (x, y) {
                         (0, 0) => "REB".to_string(),
                         (2, 2) => "BER".to_string(),
-                        _ => "x".to_string()
+                        _ => "X".to_string()
                     },
-                    answer: None,
-                    across_clue: match y {
-                        0 => 0,
-                        1 => usize::max_value(),
-                        2 => 1,
-                        _ => panic!()
+                    answer: match (x, y) {
+                        (0, 0) => "USR".to_string(),
+                        (2, 2) => "RSU".to_string(),
+                        _ => "Y".to_string()
                     },
-                    down_clue: match x {
-                        0 => 2,
-                        1 => usize::max_value(),
-                        2 => 3,
-                        _ => panic!(),
-                    },
+                    pencil: false,
                     was_incorrect: false,
                     is_incorrect: false,
                     given: false,
                     circled: x == 2 && y == 0,
-                }
+                })
             }
         }),
-        clues: [
-            Window::new((0, 0), 3, Direction::Across),
-            Window::new((0, 2), 3, Direction::Across),
-            Window::new((0, 0), 3, Direction::Down),
-            Window::new((2, 0), 3, Direction::Down),
-        ].iter().enumerate().map(|(index, &window)| {
-            Clue {
-                window,
-                clue: format!("clue {}", index),
-            }
-        }).collect(),
+        clues: WindowMap::new([
+                                  Window::new((0, 0), 3, Direction::Across),
+                                  Window::new((0, 2), 3, Direction::Across),
+                                  Window::new((0, 0), 3, Direction::Down),
+                                  Window::new((2, 0), 3, Direction::Down),
+                              ].iter().enumerate().map(|(index, &window)| {
+            (window, format!("clue {}", index))
+        }), (3, 3)),
         note: "Note".to_string(),
     };
     let mut data = vec![];

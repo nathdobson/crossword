@@ -1,4 +1,4 @@
-use std::{io, fs};
+use std::{io, fs, iter};
 use std::io::BufRead;
 use byteorder::LittleEndian;
 use encoding::{Encoding, DecoderTrap};
@@ -42,6 +42,12 @@ pub struct RawHeader {
 }
 
 #[derive(Debug)]
+pub struct PlayData {
+    time: usize,
+    running: bool,
+}
+
+#[derive(Debug)]
 pub struct RawPuzzle {
     pub header: RawHeader,
     pub solution: Grid<u8>,
@@ -54,6 +60,8 @@ pub struct RawPuzzle {
     pub rebus_index: Option<Grid<u8>>,
     pub style: Option<Grid<u8>>,
     pub rebus_data: Option<BTreeMap<u8, String>>,
+    pub play_data: Option<PlayData>,
+    pub rebus_user: Option<Grid<String>>,
 }
 
 struct PuzzleReader<'a> {
@@ -142,6 +150,8 @@ impl<'a> PuzzleReader<'a> {
             rebus_index: None,
             rebus_data: None,
             style: None,
+            rebus_user: None,
+            play_data: None,
         };
         loop {
             let name = match self.read_fixed([0u8; 4]) {
@@ -187,7 +197,29 @@ impl<'a> PuzzleReader<'a> {
                             PuzzleReader { input: &mut (&content as &[u8]) }
                                 .read_grid((header.width as usize, header.height as usize))?)
                 }
-                x => panic!("Can't handle {:?}", name)
+                b"LTIM" => {
+                    let mut split = std::str::from_utf8(&content).unwrap().split(",");
+                    result.play_data = Some(PlayData {
+                        time: split.next().unwrap().parse().unwrap(),
+                        running: split.next().unwrap().parse::<u8>().unwrap() == 1,
+                    });
+                    assert!(split.next().is_none());
+                }
+                b"RUSR" => {
+                    let mut reader = PuzzleReader { input: &mut (&content as &[u8]) };
+                    let mut cells =
+                        iter::repeat_with(|| reader.read_string())
+                            .take(result.solution.size().0 * result.solution.size().1)
+                            .collect::<io::Result<Vec<_>>>()?.into_iter();
+                    result.rebus_user = Some(
+                        Grid::new(result.solution.size(),
+                                  |x, y| cells.next().unwrap())
+                    );
+                    let mut unused = vec![];
+                    reader.input.read_to_end(&mut unused)?;
+                    assert!(unused.len() == 0);
+                }
+                x => panic!("Can't handle {:?}", String::from_utf8(name.to_vec()))
             }
         }
         let mut unparsed = vec![];
@@ -302,6 +334,17 @@ trait PuzzleWriter: Write {
                 write!(&mut data, ";")?;
             }
             extras.push((*b"RTBL", data));
+        }
+        if let Some(ref play_data) = puzzle.play_data {
+            extras.push((*b"LTIM", format!("{},{}", play_data.time, play_data.running as u8).into_bytes()));
+        }
+        if let Some(ref rebus_user) = puzzle.rebus_user {
+            let mut data = vec![];
+            for rebus in rebus_user.iter() {
+                data.extend_from_slice(&ISO_8859_1.encode(rebus, EncoderTrap::Strict).unwrap());
+                data.extend_from_slice(&[0]);
+            }
+            extras.push((*b"RUSR", data));
         }
         for (name, data) in extras {
             self.write_all(&name)?;
@@ -420,7 +463,7 @@ impl RawPuzzle {
 //}
 
 #[test]
-fn test_round_trip() {
+fn test_round_trip_read_write() {
     for filename_result in fs::read_dir("puzzles").unwrap() {
         let mut filename = filename_result.unwrap().path();
         if filename.extension() == Some(OsStr::new("puz")) {

@@ -73,45 +73,39 @@ impl<'a> Play<'a> {
         }
     }
     fn do_type(&mut self, input: u8) {
-        match &mut self.puzzle.grid[self.view.position] {
-            PuzzleCell::Black => {}
-            PuzzleCell::White { across_clue, down_clue, answer, .. } => {
-                *answer = Some(String::from_utf8(vec![input.to_ascii_uppercase()]).unwrap());
-                match self.view.direction {
-                    Direction::Across => {
-                        let clue = &self.puzzle.clues[*across_clue];
-                        self.view.position.0 += 1;
-                        if self.view.position.0 >= clue.window.position().0 + clue.window.length() {
-                            self.view.position.0 = clue.window.position().0;
-                        }
-                    }
-                    Direction::Down => {
-                        let clue = &self.puzzle.clues[*down_clue];
-                        self.view.position.1 += 1;
-                        if self.view.position.1 >= clue.window.position().1 + clue.window.length() {
-                            self.view.position.1 = clue.window.position().1;
-                        }
+        if let Some(PuzzleCell { answer, solution, .. }) = &mut self.puzzle.grid[self.view.position] {
+            let active_string = if self.view.editing { solution } else { answer };
+            *active_string = String::from_utf8(vec![input.to_ascii_uppercase()]).unwrap();
+            let window = self.puzzle.clues.window_at(self.view.position, self.view.direction).unwrap();
+            match self.view.direction {
+                Direction::Across => {
+                    self.view.position.0 += 1;
+                    if self.view.position.0 >= window.position().0 + window.length() {
+                        self.view.position.0 = window.position().0;
                     }
                 }
-                self.puzzle_changed = true;
-                self.view_changed = true;
+                Direction::Down => {
+                    self.view.position.1 += 1;
+                    if self.view.position.1 >= window.position().1 + window.length() {
+                        self.view.position.1 = window.position().1;
+                    }
+                }
             }
+            self.puzzle_changed = true;
+            self.view_changed = true;
         }
     }
     fn do_change_clue(&mut self, delta: isize) {
-        match self.puzzle.get_clue(self.view) {
+        match self.puzzle.clues.window_at(self.view.position, self.view.direction) {
             None => {}
-            Some(clue) => {
-                let mut new_clue = clue as isize + delta;
-                if new_clue >= self.puzzle.clues.len() as isize {
-                    new_clue = 0;
-                }
-                if new_clue < 0 {
-                    new_clue = (self.puzzle.clues.len() - 1) as isize;
-                }
-                let clue = new_clue as usize;
-                self.view.position = self.puzzle.clues[clue].window.position();
-                self.view.direction = self.puzzle.clues[clue].window.direction();
+            Some(window) => {
+                let window = match delta {
+                    1 => self.puzzle.clues.next_window(window),
+                    -1 => self.puzzle.clues.previous_window(window),
+                    _ => panic!(),
+                };
+                self.view.position = window.position();
+                self.view.direction = window.direction();
                 self.view_changed = true;
             }
         }
@@ -124,34 +118,28 @@ impl<'a> Play<'a> {
         self.view_changed = true;
     }
     fn do_delete(&mut self) {
-        if match &mut self.puzzle.grid[self.view.position] {
-            PuzzleCell::Black => false,
-            PuzzleCell::White { across_clue, down_clue, answer, .. } => {
-                match self.view.direction {
-                    Direction::Across => {
-                        let clue = &self.puzzle.clues[*across_clue];
-                        if self.view.position.0 == clue.window.position().0 {
-                            self.view.position.0 = clue.window.position().0 + clue.window.length() - 1;
-                        } else {
-                            self.view.position.0 -= 1;
-                        }
-                    }
-                    Direction::Down => {
-                        let clue = &self.puzzle.clues[*down_clue];
-                        if self.view.position.1 == clue.window.position().1 {
-                            self.view.position.1 = clue.window.position().1 + clue.window.length() - 1;
-                        } else {
-                            self.view.position.1 -= 1;
-                        }
+        if let Some(window) = self.puzzle.clues.window_at(self.view.position, self.view.direction) {
+            match self.view.direction {
+                Direction::Across => {
+                    if self.view.position.0 == window.position().0 {
+                        self.view.position.0 = window.position().0 + window.length() - 1;
+                    } else {
+                        self.view.position.0 -= 1;
                     }
                 }
-                true
+                Direction::Down => {
+                    if self.view.position.1 == window.position().1 {
+                        self.view.position.1 = window.position().1 + window.length() - 1;
+                    } else {
+                        self.view.position.1 -= 1;
+                    }
+                }
             }
-        } {
             match &mut self.puzzle.grid[self.view.position] {
-                PuzzleCell::Black => panic!(),
-                PuzzleCell::White { across_clue, down_clue, answer, .. } => {
-                    *answer = None;
+                None => panic!(),
+                Some(PuzzleCell { answer, solution, .. }) => {
+                    let active_string = if self.view.editing { solution } else { answer };
+                    *active_string = "".to_string();
                 }
             }
             self.view_changed = true;

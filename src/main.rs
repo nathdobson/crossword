@@ -12,14 +12,15 @@ use crate::core::word::Word;
 use crate::core::letter::Letter;
 use crate::util::grid::Grid;
 use std::{io, fmt, fs};
-use crate::play::puzzle::{windows, Puzzle, PuzzleCell, Clue};
+use crate::play::puzzle::{Puzzle, PuzzleCell, View};
 use std::fmt::{Display, Formatter};
-use std::fmt::Write;
 use csv::ReaderBuilder;
-use crate::core::puzzle::{Window, WindowMap, Cell, AsciiGrid};
+use crate::core::puzzle::{Window, WindowMap, Cell, AsciiGrid, Direction};
 use crate::fill::search::{Search, Canceled, take_one_result};
 use std::collections::{HashSet, HashMap};
-use std::io::BufRead;
+use std::io::{BufRead, stdout, stdin, Write};
+use crate::play::interface::{TerminalOutput, start_rendering, stop_rendering, TerminalInput, RawScope};
+use crate::play::play::Play;
 
 pub mod util;
 pub mod core;
@@ -114,7 +115,7 @@ fn write_impl() {
     }
     let grid = Grid::new((rows[0].len(), rows.len()), |x, y| rows[y][x]);
     println!("{:?}", grid);
-    let windows = WindowMap::from_grid(&grid);
+    let windows = WindowMap::from_grid(&Grid::new(grid.size(), |x, y| grid[(x, y)] != Cell::Black));
     let mut clues = HashMap::<&str, &str>::new();
 
     clues.insert("PIED", "Like the proverbial piper");
@@ -228,21 +229,15 @@ fn write_impl() {
         copyright: "".to_string(),
         grid: Grid::new(grid.size(), |x, y| {
             match grid[(x, y)] {
-                Cell::Black => PuzzleCell::Black,
-                Cell::White(Some(x)) => PuzzleCell::White {
+                Cell::Black => None,
+                Cell::White(Some(x)) => Some(PuzzleCell {
                     solution: [x.to_unicode()].iter().cloned().collect(),
-                    answer: None,
-                    across_clue: 0,
-                    down_clue: 0,
-                    was_incorrect: false,
-                    is_incorrect: false,
-                    given: false,
-                    circled: false,
-                },
+                    ..Default::default()
+                }),
                 _ => panic!(),
             }
         }),
-        clues: clue_list.into_iter().map(|(window, clue)| Clue { window, clue: clue.to_string() }).collect(),
+        clues: WindowMap::new(clue_list.into_iter().map(|(window, clue)| (window, clue.to_string())), grid.size()),
         note: "".to_string(),
     };
     let mut new_data: Vec<u8> = vec![];
@@ -250,8 +245,43 @@ fn write_impl() {
     fs::write("output.puz", &new_data).unwrap();
 }
 
+fn edit_impl() -> io::Result<()> {
+    let raw = RawScope::new();
+    let filename = "output/puzzle.puz";
+    let data = fs::read(filename)?;
+    let mut puzzle = Puzzle::read_from(&mut data.as_slice())?;
+    let mut view = View {
+        position: (0, 0),
+        direction: Direction::Across,
+        editing: true,
+    };
+    let mut stdout = stdout();
+    let mut stdin = stdin();
+    start_rendering(&mut stdout)?;
+    let mut input = TerminalInput { input: &mut stdin };
+    loop {
+        let mut output = vec![];
+        TerminalOutput {
+            output: &mut &mut output,
+            view: &view,
+            puzzle: &puzzle,
+        }.render()?;
+        stdout.write_all(&output)?;
+        if let Some(next) = input.read_event()? {
+            let mut play = Play::new(&mut view, &mut puzzle);
+            play.do_action(next);
+        } else { break; }
+    }
+    stop_rendering(&mut stdout)?;
+    let mut data = vec![];
+    puzzle.write_to(&mut &mut data)?;
+    fs::write(filename, data)?;
+    Ok(())
+}
+
 fn main() {
-    write_impl();
+    edit_impl().unwrap();
+    //write_impl();
     //search_impl().unwrap();
 }
 
@@ -375,7 +405,7 @@ fn search_impl() -> io::Result<()> {
     dictionary.push(Word::from_str("BAMBOOZLED").unwrap());
     dictionary.retain(|word| !banned.contains(word));
     {
-        let mut search = Search::new(WindowMap::from_grid(&grid), &dictionary);
+        let mut search = Search::new(WindowMap::from_grid(&Grid::new(grid.size(), |x, y| grid[(x, y)] != Cell::Black)), &dictionary);
 
         search.retain(&grid);
         search.refine_all();

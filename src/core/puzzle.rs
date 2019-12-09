@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, BTreeMap, btree_map};
 use std::iter::once;
 
 use enum_map::Enum;
@@ -12,6 +12,7 @@ use std::ops::{Index, IndexMut};
 use std::fmt::Display;
 use std::fmt;
 use crate::play::range_split::RangeSplitExt;
+use std::cmp::Ordering;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Enum)]
 pub enum Direction {
@@ -19,16 +20,16 @@ pub enum Direction {
     Down,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub struct Window {
     position: (u8, u8),
     length: u8,
     direction: Direction,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WindowMap<T> {
-    windows: HashMap<Window, T>,
+    windows: BTreeMap<Window, T>,
     grid: Grid<EnumMap<Direction, Option<Window>>>,
 }
 
@@ -45,6 +46,19 @@ impl Display for Cell {
             Cell::White(None) => write!(f, " "),
             Cell::White(Some(c)) => write!(f, "{}", c),
         }
+    }
+}
+
+impl Ord for Window {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.direction, self.position.1, self.position.0, self.length)
+            .cmp(&(other.direction, other.position.1, other.position.0, other.length))
+    }
+}
+
+impl PartialOrd for Window {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -100,30 +114,34 @@ impl Window {
     pub fn positions<'a>(&'a self) -> impl Iterator<Item=(usize, usize)> + 'a {
         (0..self.length()).map(move |offset| self.position_at(offset))
     }
-    pub fn offset(&self, position: (usize, usize)) -> usize {
+    pub fn offset(&self, position: (usize, usize)) -> Option<usize> {
         match self.direction {
             Direction::Across => {
-                assert_eq!(self.position().1, position.1);
-                assert!(self.position().0 <= position.0);
-                assert!(position.0 < self.position().0 + self.length());
-                position.0 - self.position().0
+                if self.position().1 == position.1 && self.position().0 <= position.0 && position.0 < self.position().0 + self.length() {
+                    Some(position.0 - self.position().0)
+                } else {
+                    None
+                }
             }
             Direction::Down => {
-                assert_eq!(self.position().0, position.0);
-                assert!(self.position().1 <= position.1);
-                assert!(position.1 < self.position().1 + self.length());
-                position.1 - self.position().1
+                if self.position().0 == position.0 && self.position().1 <= position.1 && position.1 < self.position().1 + self.length() {
+                    Some(position.1 - self.position().1)
+                } else {
+                    None
+                }
             }
         }
     }
 }
 
 impl<T> WindowMap<T> {
-    pub fn new(windows: HashMap<Window, T>, size: (usize, usize)) -> Self {
+    pub fn new(input: impl IntoIterator<Item=(Window, T)>, size: (usize, usize)) -> Self {
         let mut grid = Grid::new(size, |_, _| EnumMap::new());
-        for (window, value) in windows.iter() {
+        let mut windows = BTreeMap::new();
+        for (window, value) in input {
+            windows.insert(window, value);
             for position in window.positions() {
-                grid[position][window.direction] = Some(*window);
+                grid[position][window.direction] = Some(window);
             }
         }
 
@@ -154,9 +172,16 @@ impl<T> WindowMap<T> {
     pub fn window_at(&self, position: (usize, usize), direction: Direction) -> Option<Window> {
         self.grid[position][direction]
     }
-    pub fn get(&self,window:Window)->Option<&T>{
+    pub fn get(&self, window: Window) -> Option<&T> {
         self.windows.get(&window)
     }
+    pub fn next_window(&self, window: Window) -> Window {
+        *self.windows.range(window..).nth(1).unwrap_or(self.windows.iter().next().unwrap()).0
+    }
+    pub fn previous_window(&self, window: Window) -> Window {
+        *self.windows.range(..window).nth_back(0).unwrap_or(self.windows.iter().last().unwrap()).0
+    }
+
     /*pub fn verticals(&self) -> Vec<(usize, usize)> {
         iproduct!(0..self.grid.size().0,0..self.grid.size().1)
             .filter(|&p| {
@@ -181,25 +206,25 @@ impl<T> WindowMap<T> {
 
 
 impl WindowMap<()> {
-    pub fn from_grid(cells: &Grid<Cell>) -> Self {
+    pub fn from_grid(white: &Grid<bool>) -> Self {
         let mut windows = HashMap::new();
-        for y in 0..cells.size().1 {
-            for xs in (0..cells.size().0).range_split(|&x| cells[(x, y)] == Cell::Black) {
+        for y in 0..white.size().1 {
+            for xs in (0..white.size().0).range_split(|&x| !white[(x, y)]) {
                 let length = xs.end - xs.start;
                 if length >= 2 {
                     windows.insert(Window::new((xs.start, y), length, Direction::Across), ());
                 }
             }
         }
-        for x in 0..cells.size().0 {
-            for ys in (0..cells.size().1).range_split(|&y| cells[(x, y)] == Cell::Black) {
+        for x in 0..white.size().0 {
+            for ys in (0..white.size().1).range_split(|&y| !white[(x, y)]) {
                 let length = ys.end - ys.start;
                 if length >= 2 {
                     windows.insert(Window::new((x, ys.start), length, Direction::Down), ());
                 }
             }
         }
-        WindowMap::new(windows, cells.size())
+        WindowMap::new(windows, white.size())
     }
 }
 
@@ -218,3 +243,11 @@ impl<T> IndexMut<Window> for WindowMap<T> {
     }
 }
 
+impl<T> IntoIterator for WindowMap<T> {
+    type Item = (Window, T);
+    type IntoIter = btree_map::IntoIter<Window, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.windows.into_iter()
+    }
+}

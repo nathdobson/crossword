@@ -69,7 +69,7 @@ impl EventLoop {
 fn handle(mut stream: TcpStream, game1: Arc<Mutex<Game>>) -> io::Result<()> {
     let mut input = stream.try_clone()?;
     let mut output = BufWriter::new(stream);
-    let view = Arc::new(Mutex::new(View { position: (0, 0), direction: Direction::Across }));
+    let view = Arc::new(Mutex::new(View { position: (0, 0), direction: Direction::Across, editing: false }));
     let view2 = view.clone();
     let game2 = game1.clone();
     start_rendering(&mut output);

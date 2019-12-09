@@ -10,6 +10,31 @@ use std::convert::TryFrom;
 use std::iter;
 use crate::util::grid::Grid;
 use crate::util::lines::break_lines;
+use crate::core::puzzle::Window;
+use termios::cfmakeraw;
+use termios::{Termios, TCSANOW, ECHO, ICANON, tcsetattr};
+
+pub struct RawScope {
+    termios: Termios
+}
+
+impl RawScope {
+    pub fn new() -> Self {
+        let termios = Termios::from_fd(0).unwrap();
+        let mut new_termios = termios.clone();
+        cfmakeraw(&mut new_termios);
+        tcsetattr(0, TCSANOW, &mut new_termios).unwrap();
+        RawScope {
+            termios: termios
+        }
+    }
+}
+
+impl Drop for RawScope {
+    fn drop(&mut self) {
+        tcsetattr(0, TCSANOW, &self.termios).unwrap();
+    }
+}
 
 pub fn start_rendering(output: &mut dyn Write) -> io::Result<()> {
     write!(output, "\x1B[?1049h\x1B[?25l")?;
@@ -167,10 +192,10 @@ xx  xx
  x  x
  xxxx
 ", "
-xx  xx
-xx  xx
-xx  xx
-xxxxxx
+x    x
+x    x
+x    x
+x xx x
 xx  xx
 ", "
 xx  xx
@@ -240,9 +265,9 @@ fn draw_letter(letter: u8) -> Grid<char> {
 }
 
 impl<'a> TerminalOutput<'a> {
-    fn render_cell(&mut self, x: usize, y: usize, dy: usize, active_clue: Option<usize>) -> io::Result<()> {
+    fn render_cell(&mut self, x: usize, y: usize, dy: usize, active_clue: Option<Window>) -> io::Result<()> {
         match &self.puzzle.grid[(x, y)] {
-            PuzzleCell::Black => {
+            None => {
                 let foreground: i32 = if self.view.position == (x, y) {
                     3
                 } else {
@@ -254,20 +279,17 @@ impl<'a> TerminalOutput<'a> {
                     15
                 };
                 let c =
-                    if dy == 0 && y > 0 && match self.puzzle.grid[(x, y - 1)] {
-                        PuzzleCell::Black => false,
-                        _ => true
-                    } {
+                    if dy == 0 && y > 0 && self.puzzle.grid[(x, y - 1)].is_some() {
                         '▇'
                     } else {
                         '█'
                     };
                 write!(self.output, "\x1B[48;5;{};38;5;{}m{}\x1B[0m", background, foreground, iter::repeat(c).take(CELL_WIDTH).collect::<String>())?;
             }
-            PuzzleCell::White { across_clue, down_clue, answer, circled, .. } => {
+            Some(PuzzleCell { answer, solution, circled, .. }) => {
                 let background = if self.view.position == (x, y) {
                     11
-                } else if Some(*across_clue) == active_clue || Some(*down_clue) == active_clue {
+                } else if active_clue.map(|active_clue| active_clue.offset((x, y)).is_some()).unwrap_or(false) {
                     if (x + y) % 2 == 0 {
                         51
                     } else {
@@ -280,12 +302,18 @@ impl<'a> TerminalOutput<'a> {
                         252
                     }
                 };
-                let contents = match answer {
-                    None => iter::repeat(' ').take(CELL_WIDTH).collect::<String>(),
-                    Some(c) => {
-                        let grid = draw_letter(c.chars().next().unwrap() as u8);
-                        (0..CELL_WIDTH).map(|dx| grid[(dx, dy)]).collect::<String>()
-                    }
+                let contents_string = if self.view.editing {
+                    solution
+                } else {
+                    answer
+                };
+                let contents = if contents_string.chars().count() == 1 {
+                    let grid = draw_letter(contents_string.chars().next().unwrap() as u8);
+                    (0..CELL_WIDTH).map(|dx| grid[(dx, dy)]).collect::<String>()
+                } else if contents_string == "" {
+                    iter::repeat(' ').take(CELL_WIDTH).collect::<String>()
+                } else {
+                    unimplemented!();
                 };
                 let code = if *circled {
                     format!("\x1b[4m{}\x1b[0m", contents)
@@ -303,7 +331,7 @@ impl<'a> TerminalOutput<'a> {
         write!(self.output, "\x1B[H\x1B[J")?;
 
 
-        let active_clue = self.puzzle.get_clue(self.view);
+        let active_clue = self.puzzle.clues.window_at(self.view.position, self.view.direction);
         for y in 0..self.puzzle.grid.size().1 {
             for dy in 0..CELL_HEIGHT {
                 //write!(self.output, "\x1B#{}", half);
@@ -315,24 +343,21 @@ impl<'a> TerminalOutput<'a> {
         }
 
         if let Some(active_clue) = active_clue {
-            for line in break_lines(&self.puzzle.clues[active_clue].clue, 50) {
+            for line in break_lines(&self.puzzle.clues[active_clue], 50) {
                 for half in &[3, 4] {
                     write!(self.output, "\x1B#{}{}\r\n", half, line)?;
                 }
             }
         };
 
-        let mut solved = true;
-        for cell in self.puzzle.grid.iter() {
-            match cell {
-                PuzzleCell::White { answer, solution, .. } => {
-                    if Some(solution) != answer.as_ref() {
-                        solved = false;
-                    }
+        let solved = self.puzzle.grid.iter().all(|cell| {
+            if let Some(PuzzleCell { answer, solution, .. }) = cell {
+                if solution != answer {
+                    return false;
                 }
-                _ => {}
             }
-        }
+            true
+        });
         if solved {
             write!(self.output, "\r\n\r\n")?;
             for half in &[3, 4] {
