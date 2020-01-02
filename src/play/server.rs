@@ -29,7 +29,7 @@ use std::io::BufReader;
 use std::io::BufRead;
 use crate::play::play::Play;
 use crate::play::interface::{TerminalInput, start_rendering, TerminalOutput, stop_rendering};
-use crate::play::puzzle::{Puzzle, View};
+use crate::play::puzzle::{Puzzle, View, Mode};
 use crate::play::dirty::DirtyLoop;
 use crate::util::bag::Bag;
 use crate::core::puzzle::Direction;
@@ -52,7 +52,7 @@ impl EventLoop {
         while let Some(action) = (TerminalInput { input: &mut self.input }.read_event()?) {
             let mut view = self.view.lock().unwrap();
             let mut game = self.game.lock().unwrap();
-            let mut play = Play::new(&mut *view, &mut game.puzzle);
+            let mut play = Play::new(&mut *view, &mut game.puzzle, None);
             play.do_action(action);
             if play.puzzle_changed() {
                 for listener in game.listeners.into_iter() {
@@ -69,7 +69,12 @@ impl EventLoop {
 fn handle(mut stream: TcpStream, game1: Arc<Mutex<Game>>) -> io::Result<()> {
     let mut input = stream.try_clone()?;
     let mut output = BufWriter::new(stream);
-    let view = Arc::new(Mutex::new(View { position: (0, 0), direction: Direction::Across, editing: false }));
+    let view = Arc::new(Mutex::new(View {
+        position: (0, 0),
+        direction: Direction::Across,
+        mode: Mode::Solving,
+        pencil: false
+    }));
     let view2 = view.clone();
     let game2 = game1.clone();
     start_rendering(&mut output);

@@ -1,4 +1,4 @@
-use crate::core::puzzle::{WindowMap, Direction, Cell, AsciiGrid, Window};
+use crate::core::puzzle::{WindowMap, Direction, AsciiGrid, Window, Cell};
 use crate::fill::word_set::WordSet;
 use std::collections::{HashSet, HashMap};
 use crate::core::letter::{Letter, LetterSet};

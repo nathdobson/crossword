@@ -20,17 +20,27 @@ use std::ffi::OsStr;
 use std::collections::{HashMap, BTreeSet};
 use std::collections::BTreeMap;
 use crate::util::grid::Grid;
-use crate::core::puzzle::{Direction, Window, WindowMap, Cell};
+use crate::core::puzzle::{Direction, Window, WindowMap};
 use crate::play::raw_puzzle::MAGIC;
+
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Mode {
+    Solving,
+    Editing,
+    EditingClue {
+        cursor: usize,
+    },
+}
 
 #[derive(Clone)]
 pub struct View {
     pub position: (usize, usize),
     pub direction: Direction,
-    pub editing: bool,
+    pub mode: Mode,
+    pub pencil: bool,
 }
 
-#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Debug, Default)]
+#[derive(Eq, Ord, PartialEq, PartialOrd, Clone, Debug)]
 pub struct PuzzleCell {
     pub solution: String,
     pub answer: String,
@@ -39,6 +49,20 @@ pub struct PuzzleCell {
     pub is_incorrect: bool,
     pub given: bool,
     pub circled: bool,
+}
+
+impl Default for PuzzleCell {
+    fn default() -> Self {
+        PuzzleCell {
+            solution: "".to_string(),
+            answer: "".to_string(),
+            pencil: false,
+            was_incorrect: false,
+            is_incorrect: false,
+            given: false,
+            circled: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -118,7 +142,11 @@ impl Puzzle {
                                     })
                                 }
                                 _ => None
-                            }.unwrap_or(String::from_utf8(vec![solution_letter]).unwrap());
+                            }.unwrap_or(if solution_letter == b'-' {
+                                String::new()
+                            } else {
+                                String::from_utf8(vec![solution_letter]).unwrap()
+                            });
                             let mut answer = "".to_string();
                             if let Some(rebus_user) = &raw.rebus_user {
                                 answer = rebus_user[(x, y)].to_string();
@@ -174,7 +202,7 @@ impl Puzzle {
         let rebuses: BTreeSet<String> = self.grid.iter().filter_map(|cell| {
             match cell {
                 Some(PuzzleCell { solution, .. }) => {
-                    if string_to_letter(solution).is_some() {
+                    if solution == "" || string_to_letter(solution).is_some() {
                         None
                     } else {
                         Some(solution.clone())

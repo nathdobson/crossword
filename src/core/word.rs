@@ -66,6 +66,12 @@ impl Word {
         }
         Ok(result)
     }
+    pub fn to_unicode(self) -> String {
+        self.into_iter().map(|l| l.to_unicode()).collect()
+    }
+    pub fn into_iter<'a>(&'a self) -> impl 'a + Iterator<Item=Letter> {
+        self.buffer[0..self.length].iter().cloned()
+    }
 }
 
 impl Index<usize> for Word {

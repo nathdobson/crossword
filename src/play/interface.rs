@@ -13,6 +13,8 @@ use crate::util::lines::break_lines;
 use crate::core::puzzle::Window;
 use termios::cfmakeraw;
 use termios::{Termios, TCSANOW, ECHO, ICANON, tcsetattr};
+use crate::play::puzzle::Mode::Solving;
+use crate::play::puzzle::Mode;
 
 pub struct RawScope {
     termios: Termios
@@ -133,10 +135,10 @@ xx
 xxxxxx
 ", "
 xx  xx
-xxxxxx
-xx  xx
-xx  xx
-xx  xx
+x xx x
+x    x
+x    x
+x    x
 ", "
 xx  xx
 xxx xx
@@ -286,7 +288,7 @@ impl<'a> TerminalOutput<'a> {
                     };
                 write!(self.output, "\x1B[48;5;{};38;5;{}m{}\x1B[0m", background, foreground, iter::repeat(c).take(CELL_WIDTH).collect::<String>())?;
             }
-            Some(PuzzleCell { answer, solution, circled, .. }) => {
+            Some(PuzzleCell { answer, solution, circled, pencil, .. }) => {
                 let background = if self.view.position == (x, y) {
                     11
                 } else if active_clue.map(|active_clue| active_clue.offset((x, y)).is_some()).unwrap_or(false) {
@@ -302,10 +304,10 @@ impl<'a> TerminalOutput<'a> {
                         252
                     }
                 };
-                let contents_string = if self.view.editing {
-                    solution
-                } else {
+                let contents_string = if self.view.mode == Solving {
                     answer
+                } else {
+                    solution
                 };
                 let contents = if contents_string.chars().count() == 1 {
                     let grid = draw_letter(contents_string.chars().next().unwrap() as u8);
@@ -321,7 +323,8 @@ impl<'a> TerminalOutput<'a> {
                 } else {
                     format!("{}", contents)
                 };
-                write!(self.output, "\x1B[48;5;{};38;5;16m{}\x1B[0m", background, code)?;
+                let foreground = if *pencil { 244 } else { 16 };
+                write!(self.output, "\x1B[48;5;{};38;5;{}m{}\x1B[0m", background, foreground, code)?;
             }
         }
         Ok(())
@@ -341,27 +344,57 @@ impl<'a> TerminalOutput<'a> {
                 write!(self.output, "\r\n")?;
             }
         }
+        for half in &[3, 4] {
+            write!(self.output, "\x1B#{}", half)?;
+            if self.view.pencil {
+                write!(self.output, "\x1B[7m")?;
+            }
+            write!(self.output, "✎")?;
+            if self.view.pencil {
+                write!(self.output, "\x1B[0m")?;
+            }
+            write!(self.output, "\r\n")?;
+        }
 
         if let Some(active_clue) = active_clue {
+            let mut cursor = match self.view.mode {
+                Mode::EditingClue { cursor } => Some(cursor),
+                _ => None
+            };
             for line in break_lines(&self.puzzle.clues[active_clue], 50) {
                 for half in &[3, 4] {
-                    write!(self.output, "\x1B#{}{}\r\n", half, line)?;
+                    write!(self.output, "\x1B#{}", half)?;
+                    match cursor {
+                        Some(c) if c < line.len() => {
+                            write!(self.output, "{}\x1B[7m{}\x1B[0m{}",
+                                   &line[0..c],
+                                   &line[c..c + 1],
+                                   &line[c + 1..])?;
+                        }
+                        _ => {
+                            write!(self.output, "{}", line)?;
+                        }
+                    }
+                    write!(self.output, "\r\n")?;
                 }
+                cursor = cursor.and_then(|x| x.checked_sub(line.len()));
             }
         };
 
-        let solved = self.puzzle.grid.iter().all(|cell| {
-            if let Some(PuzzleCell { answer, solution, .. }) = cell {
-                if solution != answer {
-                    return false;
+        if self.view.mode == Mode::Solving {
+            let solved = self.puzzle.grid.iter().all(|cell| {
+                if let Some(PuzzleCell { answer, solution, .. }) = cell {
+                    if solution != answer {
+                        return false;
+                    }
                 }
-            }
-            true
-        });
-        if solved {
-            write!(self.output, "\r\n\r\n")?;
-            for half in &[3, 4] {
-                write!(self.output, "\x1B#{}{}\r\n", half, "🎉🎉🎉🎉CONGRATULATIONS🎉🎉🎉🎉")?;
+                true
+            });
+            if solved {
+                write!(self.output, "\r\n\r\n")?;
+                for half in &[3, 4] {
+                    write!(self.output, "\x1B#{}{}\r\n", half, "🎉🎉🎉🎉CONGRATULATIONS🎉🎉🎉🎉")?;
+                }
             }
         }
 
@@ -405,15 +438,35 @@ impl<'a> TerminalInput<'a> {
                     return Ok(Some(Action::Type { letter: x }));
                 }
                 b' ' => {
-                    return Ok(Some(Action::ChangeDirection));
+                    return Ok(Some(Action::ToggleDirection));
                 }
                 13 | 9 => {
                     return Ok(Some(Action::ChangeClue { change: 1 }));
                 }
+                23 => {
+                    return Ok(Some(Action::ChangeColor));
+                }
+                7 => {
+                    return Ok(Some(Action::Generate));
+                }
+                1 => {
+                    return Ok(Some(Action::Reject));
+                }
+                19 => {
+                    return Ok(Some(Action::Accept));
+                }
                 127 => {
                     return Ok(Some(Action::Delete));
                 }
-                x => {}
+                16 => {
+                    return Ok(Some(Action::TogglePencil));
+                }
+                5 => {
+                    return Ok(Some(Action::ToggleEditClue));
+                }
+                x => {
+                    eprintln!("unknown = {}", x);
+                }
             }
         }
     }

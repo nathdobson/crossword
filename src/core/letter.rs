@@ -45,6 +45,14 @@ impl Letter {
             None
         }
     }
+    pub fn from_str(s: &str) -> Option<Self> {
+        let mut chars = s.chars();
+        let result = Self::from_unicode(chars.next()?)?;
+        if chars.next().is_some() {
+            return None;
+        }
+        return Some(result);
+    }
     pub fn to_unicode(self) -> char {
         (self.0 + ('A' as u8)) as char
     }
