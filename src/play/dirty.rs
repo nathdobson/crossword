@@ -23,9 +23,9 @@ impl DirtyLoop {
                     let old_state;
                     {
                         let mut lock =
-                            state.1.wait_until(
+                            state.1.wait_while(
                                 state.0.lock().unwrap(),
-                                |&mut value| value.dirty || value.canceled).unwrap();
+                                |&mut value| !value.dirty && !value.canceled).unwrap();
                         old_state = *lock;
                         lock.dirty = false;
                     }

@@ -361,7 +361,8 @@ impl<'a> TerminalOutput<'a> {
                 Mode::EditingClue { cursor } => Some(cursor),
                 _ => None
             };
-            for line in break_lines(&self.puzzle.clues[active_clue], 50) {
+            let with_space = format!("{} ", &self.puzzle.clues[active_clue]);
+            for line in break_lines(&with_space, 50) {
                 for half in &[3, 4] {
                     write!(self.output, "\x1B#{}", half)?;
                     match cursor {
@@ -434,11 +435,9 @@ impl<'a> TerminalInput<'a> {
                     }
                     y => {}
                 }
-                x @ b'A'..=b'Z' | x @ b'a'..=b'z' => {
+                //x @ b'A'..=b'Z' | x @ b'a'..=b'z' | b' ' => {
+                x @ b' '..=b'~' => {
                     return Ok(Some(Action::Type { letter: x }));
-                }
-                b' ' => {
-                    return Ok(Some(Action::ToggleDirection));
                 }
                 13 | 9 => {
                     return Ok(Some(Action::ChangeClue { change: 1 }));

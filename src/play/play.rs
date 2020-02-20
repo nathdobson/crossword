@@ -18,7 +18,6 @@ pub enum Action {
     MoveLeft,
     Type { letter: u8 },
     ChangeClue { change: isize },
-    ToggleDirection,
     Delete,
     ChangeColor,
     Generate,
@@ -78,7 +77,6 @@ impl<'a> Play<'a> {
             Action::MoveLeft => self.do_move_left(),
             Action::Type { letter } => self.do_type(letter),
             Action::ChangeClue { change } => self.do_change_clue(change),
-            Action::ToggleDirection => self.do_change_direction(),
             Action::Delete => self.do_delete(),
             Action::ChangeColor => self.change_color(),
             Action::Generate => self.generate(),
@@ -109,7 +107,7 @@ impl<'a> Play<'a> {
         let window = self.get_current_window();
         if match &mut self.view.mode {
             Mode::EditingClue { cursor } =>
-                increase(cursor, self.puzzle.clues[window.unwrap()].len()),
+                increase(cursor, self.puzzle.clues[window.unwrap()].len() + 1),
             _ => increase(&mut self.view.position.0, self.puzzle.grid.size().0),
         } {
             self.view_changed = true;
@@ -133,7 +131,12 @@ impl<'a> Play<'a> {
                     cursor,
                     &mut self.puzzle.clues[window.unwrap()],
                     input),
-            _ => self.do_type_in_grid(input)
+            _ => {
+                match input {
+                    b' ' => self.do_change_direction(),
+                    _ => self.do_type_in_grid(input)
+                }
+            }
         }
     }
 
@@ -168,6 +171,10 @@ impl<'a> Play<'a> {
     }
 
     fn do_change_clue(&mut self, delta: isize) {
+        match &mut self.view.mode {
+            Mode::EditingClue { cursor } => *cursor = 0,
+            _ => {}
+        }
         match self.puzzle.clues.window_at(self.view.position, self.view.direction) {
             None => {}
             Some(window) => {
@@ -184,11 +191,18 @@ impl<'a> Play<'a> {
     }
 
     fn do_change_direction(&mut self) {
-        self.view.direction = match self.view.direction {
-            Direction::Across => Direction::Down,
-            Direction::Down => Direction::Across,
-        };
-        self.view_changed = true;
+        match self.view.mode {
+            Mode::EditingClue { cursor } => {
+                self.do_type(b' ')
+            }
+            _ => {
+                self.view.direction = match self.view.direction {
+                    Direction::Across => Direction::Down,
+                    Direction::Down => Direction::Across,
+                };
+                self.view_changed = true;
+            }
+        }
     }
 
     fn do_delete(&mut self) {
@@ -278,6 +292,7 @@ impl<'a> Play<'a> {
                 &Grid::new(grid.size(), |x, y| grid[(x, y)] != Cell::Black)), &dictionary);
         search.retain(&grid);
         search.refine_all();
+        eprintln!("{:?}", search);
         let mut result = None;
         let _ = search.solve(&mut take_one_result(&mut result));
         if let Some(solution) = result {
@@ -297,6 +312,8 @@ impl<'a> Play<'a> {
                     }
                 }
             }
+        } else {
+            eprintln!("No solution");
         }
     }
 

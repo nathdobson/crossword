@@ -1,5 +1,5 @@
 #![allow(dead_code, non_snake_case, unused_variables, unused_imports)]
-#![feature(box_syntax, step_trait, wait_until, rustc_private, const_fn)]
+#![feature(box_syntax, step_trait, rustc_private, const_fn)]
 
 #[macro_use]
 extern crate itertools;
@@ -108,6 +108,9 @@ impl<E: Display> From<E> for ParseError {
 fn main_impl(args: &[String], matches: getopts::Matches) -> Result<(), ParseError> {
     if matches.opt_present("h") {
         return Err(ParseError(format!("")));
+    }
+    if matches.free.is_empty() {
+        return Err(ParseError(format!("No arguments")));
     }
     match matches.free[0].as_str() {
         "create" => {
